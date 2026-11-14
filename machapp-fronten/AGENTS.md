@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Fresh Vite + React 19 SPA (JavaScript, not TypeScript). No router, state library, test runner, or backend yet.
+Vite + React 19 SPA (JavaScript, not TypeScript) with React Router. Auth is backed by a Spring Boot API in `../MacthAppBackend`; the rest of the app is still localStorage mock.
 
 ## Commands
 
@@ -27,8 +27,9 @@ npm run lint     # eslint . (flat config, ignores dist/)
 - Entry chain: `index.html` -> `src/main.jsx` -> `src/App.jsx`.
 - `src/App.css` holds hand-written component styles; Tailwind utilities are used inline in JSX.
 - Static assets in `public/` are served from `/` (e.g. `/icons.svg`); imported assets live in `src/assets/`.
-- `src/page/` holds screen-level components. `src/page/Login.jsx` is not mounted yet; `src/App.jsx` still renders the Vite starter demo.
-- Login has no backend: it authenticates against `DEMO_ACCOUNTS` in that file, then calls an `onSuccess` prop or redirects to `/descubrimiento` via `window.location.assign`. Replace with the real API when available.
+- `src/page/` holds screen-level components; `src/App.jsx` mounts the routes (`/login`, `/registro`, `/recuperar-contrasena`, protected screens).
+- Auth is wired to the Spring backend through `src/services/api.js` and `src/services/auth.js` (`/api/auth/login`, `/api/auth/register`, `/api/auth/google`, `/api/auth/dni/{dni}`, `/api/auth/forgot-password`, `/api/auth/reset-password`). Account endpoints `/api/users/me` and `/api/users/me/password` require `Authorization: Bearer <token>`. Configure `VITE_API_URL` and `VITE_DEMO_MODE=false` in `.env.local` and in the Railway frontend service; `VITE_GOOGLE_CLIENT_ID` is optional and only enables the Google button. The rest of the app is still localStorage mock.
+- `Login` calls `onSuccess` if provided, otherwise navigates to `/descubrimiento`. Sessions store `{ identifier, role, user, token, loggedAt }` via `src/auth.js`.
 
 ## Conventions
 
@@ -38,4 +39,4 @@ npm run lint     # eslint . (flat config, ignores dist/)
 
 ## Git
 
-The git root is `/home/francojc/Documentos/MachApp`, one level above this package. Stage only paths inside `machapp-fronten/` when committing.
+The git root is `/home/francojc/Documentos/MatchApp`. The repo also contains `MacthAppBackend/`; stage only the paths you changed when committing.

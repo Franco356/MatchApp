@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import BottomNav from '../components/BottomNav.jsx'
 import { clearSession, getSession } from '../auth.js'
-import { findAccount, updateAccountPassword } from '../services/accounts.js'
+import { changePassword } from '../services/auth.js'
 
 const INPUT_CLASS =
   'w-full rounded-xl border border-slate-300 bg-white px-3.5 py-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-rose-400 focus:ring-4 focus:ring-rose-100'
@@ -15,7 +15,6 @@ const FieldError = ({ message }) =>
 function Ajustes() {
   const navigate = useNavigate()
   const [session] = useState(() => getSession())
-  const [account] = useState(() => findAccount(session?.identifier))
   const [form, setForm] = useState({
     currentPassword: '',
     password: '',
@@ -24,30 +23,26 @@ function Ajustes() {
   const [showPassword, setShowPassword] = useState(false)
   const [errors, setErrors] = useState({})
   const [saved, setSaved] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
   const updateField = (field) => (event) => {
     setForm((current) => ({ ...current, [field]: event.target.value }))
     setSaved(false)
 
-    if (errors[field]) {
-      setErrors((current) => ({ ...current, [field]: '' }))
+    if (errors[field] || errors.form) {
+      setErrors((current) => ({ ...current, [field]: '', form: '' }))
     }
   }
 
-  const handleSubmit = (event) => {
+  const handleSubmit = async (event) => {
     event.preventDefault()
 
-    if (!account) {
-      setErrors({ currentPassword: 'No encontramos tu cuenta.' })
-      return
-    }
+    if (isSubmitting) return
 
     const nextErrors = {}
 
     if (!form.currentPassword) {
       nextErrors.currentPassword = 'Ingresa tu contraseña actual.'
-    } else if (account && form.currentPassword !== account.password) {
-      nextErrors.currentPassword = 'La contraseña actual no es correcta.'
     }
 
     if (!form.password) {
@@ -68,9 +63,35 @@ function Ajustes() {
 
     if (Object.keys(nextErrors).length > 0) return
 
-    updateAccountPassword(account.email, form.password)
-    setForm({ currentPassword: '', password: '', confirmPassword: '' })
-    setSaved(true)
+    if (!session?.token) {
+      setErrors({ form: 'Tu sesión expiró. Inicia sesión de nuevo.' })
+      return
+    }
+
+    setIsSubmitting(true)
+
+    try {
+      await changePassword(
+        {
+          currentPassword: form.currentPassword,
+          newPassword: form.password,
+        },
+        session.token,
+      )
+
+      setForm({ currentPassword: '', password: '', confirmPassword: '' })
+      setSaved(true)
+    } catch (error) {
+      if (error?.status === 400 && /actual/i.test(error?.message ?? '')) {
+        setErrors({ currentPassword: error.message })
+      } else {
+        setErrors({
+          form: error?.message || 'No pudimos actualizar la contraseña.',
+        })
+      }
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   const handleLogout = () => {
@@ -114,6 +135,15 @@ function Ajustes() {
             className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs font-medium text-emerald-700"
           >
             Contraseña actualizada correctamente.
+          </p>
+        )}
+
+        {errors.form && (
+          <p
+            role="alert"
+            className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs font-medium text-rose-700"
+          >
+            {errors.form}
           </p>
         )}
 
@@ -201,9 +231,10 @@ function Ajustes() {
 
             <button
               type="submit"
-              className="w-full rounded-full bg-gradient-to-r from-[#f2455c] to-[#f58a5f] px-4 py-3.5 text-sm font-semibold text-white shadow-lg shadow-rose-500/30 transition hover:brightness-105 focus:outline-none focus:ring-4 focus:ring-rose-200"
+              disabled={isSubmitting}
+              className="w-full rounded-full bg-gradient-to-r from-[#f2455c] to-[#f58a5f] px-4 py-3.5 text-sm font-semibold text-white shadow-lg shadow-rose-500/30 transition hover:brightness-105 focus:outline-none focus:ring-4 focus:ring-rose-200 disabled:cursor-not-allowed disabled:from-slate-300 disabled:to-slate-300 disabled:shadow-none"
             >
-              Guardar contraseña
+              {isSubmitting ? 'Guardando...' : 'Guardar contraseña'}
             </button>
           </form>
         </section>
@@ -227,7 +258,7 @@ function Ajustes() {
         <section className="mt-4 rounded-2xl bg-white p-5 shadow-lg shadow-slate-400/20">
           <h2 className="text-sm font-bold text-slate-900">Cuenta</h2>
           <p className="mt-1 text-xs text-slate-500">
-            {account?.email ?? session?.identifier}
+            {session?.user?.email ?? session?.identifier}
           </p>
           <button
             type="button"

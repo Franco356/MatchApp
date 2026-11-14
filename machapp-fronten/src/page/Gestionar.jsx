@@ -1,13 +1,9 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import BottomNav from '../components/BottomNav.jsx'
-import { clearSession, getSession } from '../auth.js'
-import {
-  findAccount,
-  getProfile,
-  saveProfile,
-  updateAccount,
-} from '../services/accounts.js'
+import { clearSession, getSession, saveSession } from '../auth.js'
+import { getProfile, saveProfile } from '../services/accounts.js'
+import { updateMe } from '../services/auth.js'
 
 const GENDERS = ['Mujer', 'Hombre', 'Otro']
 const LOOKING_FOR = ['Mujeres', 'Hombres', 'Todos']
@@ -40,10 +36,10 @@ const EmptyValue = ({ children }) => (
 function Gestionar() {
   const navigate = useNavigate()
   const [session] = useState(() => getSession())
-  const [account, setAccount] = useState(() => findAccount(session?.identifier))
+  const [account, setAccount] = useState(() => session?.user ?? null)
   const [names, setNames] = useState(() => ({
-    nombres: account?.nombres ?? '',
-    apellidos: account?.apellidos ?? '',
+    nombres: session?.user?.nombres ?? '',
+    apellidos: session?.user?.apellidos ?? '',
   }))
   const [profile, setProfile] = useState(() => {
     const stored = getProfile(session?.identifier)
@@ -55,6 +51,7 @@ function Gestionar() {
     }
   })
   const [isEditing, setIsEditing] = useState(false)
+  const [isSaving, setIsSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [errors, setErrors] = useState({})
   const [locationStatus, setLocationStatus] = useState(
@@ -141,6 +138,7 @@ function Gestionar() {
       nombres: account?.nombres ?? '',
       apellidos: account?.apellidos ?? '',
     })
+    setErrors({})
 
     const stored = getProfile(session?.identifier)
     setProfile({
@@ -155,8 +153,10 @@ function Gestionar() {
     setIsEditing(false)
   }
 
-  const handleSave = (event) => {
+  const handleSave = async (event) => {
     event.preventDefault()
+
+    if (isSaving) return
 
     const nextErrors = {}
     const nombres = names.nombres.trim()
@@ -190,25 +190,44 @@ function Gestionar() {
 
     if (Object.keys(nextErrors).length > 0) return
 
-    const updatedAccount = updateAccount(session?.identifier, {
-      nombres,
-      apellidos,
-    })
-
-    if (updatedAccount) {
-      setAccount(updatedAccount)
+    if (!session?.token) {
+      setErrors({ general: 'Tu sesión expiró. Inicia sesión de nuevo.' })
+      return
     }
 
-    saveProfile(session?.identifier, {
-      gender: profile.gender,
-      lookingFor: profile.lookingFor,
-      bio: profile.bio.trim(),
-      interests: profile.interests,
-      location: profile.location,
-    })
+    setIsSaving(true)
 
-    setSaved(true)
-    setIsEditing(false)
+    try {
+      const updatedAccount = await updateMe(
+        { nombres, apellidos },
+        session.token,
+      )
+
+      setAccount(updatedAccount)
+      saveSession({
+        ...session,
+        identifier: updatedAccount.email,
+        role: updatedAccount.role,
+        user: updatedAccount,
+      })
+
+      saveProfile(session?.identifier, {
+        gender: profile.gender,
+        lookingFor: profile.lookingFor,
+        bio: profile.bio.trim(),
+        interests: profile.interests,
+        location: profile.location,
+      })
+
+      setSaved(true)
+      setIsEditing(false)
+    } catch (error) {
+      setErrors({
+        general: error?.message || 'No pudimos guardar los cambios.',
+      })
+    } finally {
+      setIsSaving(false)
+    }
   }
 
   const handleLogout = () => {
@@ -601,6 +620,15 @@ function Gestionar() {
               )}
             </div>
 
+            {errors.general && (
+              <p
+                role="alert"
+                className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs font-medium text-rose-700"
+              >
+                {errors.general}
+              </p>
+            )}
+
             <div className="flex flex-col gap-3 sm:flex-row">
               <button
                 type="button"
@@ -611,9 +639,10 @@ function Gestionar() {
               </button>
               <button
                 type="submit"
-                className="w-full rounded-full bg-gradient-to-r from-[#f2455c] to-[#f58a5f] px-4 py-3.5 text-sm font-semibold text-white shadow-lg shadow-rose-500/30 transition hover:brightness-105 focus:outline-none focus:ring-4 focus:ring-rose-200 sm:flex-1"
+                disabled={isSaving}
+                className="w-full rounded-full bg-gradient-to-r from-[#f2455c] to-[#f58a5f] px-4 py-3.5 text-sm font-semibold text-white shadow-lg shadow-rose-500/30 transition hover:brightness-105 focus:outline-none focus:ring-4 focus:ring-rose-200 disabled:cursor-not-allowed disabled:from-slate-300 disabled:to-slate-300 disabled:shadow-none sm:flex-1"
               >
-                Guardar cambios
+                {isSaving ? 'Guardando...' : 'Guardar cambios'}
               </button>
             </div>
           </form>

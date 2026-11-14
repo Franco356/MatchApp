@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { saveSession } from '../auth.js'
-import { getAccounts } from '../services/accounts.js'
+import { GoogleLogin } from '@react-oauth/google'
+import { buildSession, saveSession } from '../auth.js'
+import { login as loginRequest, loginWithGoogle } from '../services/auth.js'
 
 const MAX_ATTEMPTS = 5
 const LOCK_DURATION_MS = 5 * 60 * 1000
 const DISCOVERY_PATH = '/descubrimiento'
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID
 
 const EMPTY_ERRORS = { identifier: '', password: '', form: '' }
 
@@ -13,12 +15,6 @@ const INPUT_CLASS =
   'w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-rose-400 focus:ring-4 focus:ring-rose-100 disabled:cursor-not-allowed disabled:opacity-60'
 
 const isEmail = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
-const isDni = (value) => /^\d{8}$/.test(value)
-
-const matchesIdentifier = (account, identifier) => {
-  const value = identifier.trim().toLowerCase()
-  return account.email.toLowerCase() === value || account.dni === value
-}
 
 const formatCountdown = (seconds) => {
   const minutes = Math.floor(seconds / 60)
@@ -26,11 +22,13 @@ const formatCountdown = (seconds) => {
   return `${String(minutes).padStart(2, '0')}:${String(remainingSeconds).padStart(2, '0')}`
 }
 
-function Login({ accounts = getAccounts(), onSuccess }) {
+function Login({ onSuccess }) {
   const navigate = useNavigate()
   const [identifier, setIdentifier] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [googleLoading, setGoogleLoading] = useState(false)
   const [errors, setErrors] = useState(EMPTY_ERRORS)
   const [failedAttempts, setFailedAttempts] = useState(0)
   const [lockedUntil, setLockedUntil] = useState(0)
@@ -38,6 +36,7 @@ function Login({ accounts = getAccounts(), onSuccess }) {
 
   const isLocked = lockedUntil > now
   const secondsLeft = isLocked ? Math.ceil((lockedUntil - now) / 1000) : 0
+  const isBusy = isSubmitting || googleLoading
 
   useEffect(() => {
     if (!lockedUntil) return undefined
@@ -59,9 +58,9 @@ function Login({ accounts = getAccounts(), onSuccess }) {
     const value = identifier.trim()
 
     if (!value) {
-      nextErrors.identifier = 'Ingresa tu correo o DNI.'
-    } else if (!isEmail(value) && !isDni(value)) {
-      nextErrors.identifier = 'Ingresa un correo válido o un DNI de 8 dígitos.'
+      nextErrors.identifier = 'Ingresa tu correo electrónico.'
+    } else if (!isEmail(value)) {
+      nextErrors.identifier = 'Ingresa un correo electrónico válido.'
     }
 
     if (!password) {
@@ -87,38 +86,26 @@ function Login({ accounts = getAccounts(), onSuccess }) {
     }
   }
 
-  const handleSubmit = (event) => {
-    event.preventDefault()
-
-    if (isLocked) return
-
-    const nextErrors = validate()
-    setErrors(nextErrors)
-
-    if (nextErrors.identifier || nextErrors.password) return
-
-    const account = accounts.find((item) => matchesIdentifier(item, identifier))
-
-    if (account && account.password === password) {
-      setFailedAttempts(0)
-      setLockedUntil(0)
-      setErrors(EMPTY_ERRORS)
-
-      const session = {
-        identifier: identifier.trim(),
-        role: account.role ?? 'user',
-        loggedAt: new Date().toISOString(),
-      }
-      saveSession(session)
-
-      if (onSuccess) {
-        onSuccess(session)
-      } else {
-        navigate(DISCOVERY_PATH, { replace: true })
-      }
+  const applySession = (data) => {
+    if (!data?.token) {
+      setErrors({
+        ...EMPTY_ERRORS,
+        form: 'El servidor no devolvió una sesión válida.',
+      })
       return
     }
 
+    const session = buildSession(data)
+    saveSession(session)
+
+    if (onSuccess) {
+      onSuccess(session)
+    } else {
+      navigate(DISCOVERY_PATH, { replace: true })
+    }
+  }
+
+  const registerFailedAttempt = (message) => {
     const expiredLock = lockedUntil > 0 && Date.now() >= lockedUntil
     const previousAttempts = expiredLock ? 0 : failedAttempts
     const attempts = previousAttempts + 1
@@ -135,12 +122,80 @@ function Login({ accounts = getAccounts(), onSuccess }) {
     setLockedUntil(0)
     setErrors({
       ...EMPTY_ERRORS,
-      form: `Correo/DNI o contraseña incorrectos. Te ${
+      form: `${message} Te ${
         MAX_ATTEMPTS - attempts === 1 ? 'queda' : 'quedan'
       } ${MAX_ATTEMPTS - attempts} intento${
         MAX_ATTEMPTS - attempts === 1 ? '' : 's'
       }.`,
     })
+  }
+
+  const handleSubmit = async (event) => {
+    event.preventDefault()
+
+    if (isLocked || isBusy) return
+
+    const nextErrors = validate()
+    setErrors(nextErrors)
+
+    if (nextErrors.identifier || nextErrors.password) return
+
+    setIsSubmitting(true)
+
+    try {
+      const data = await loginRequest({
+        email: identifier,
+        password,
+      })
+
+      setFailedAttempts(0)
+      setLockedUntil(0)
+      setErrors(EMPTY_ERRORS)
+      applySession(data)
+    } catch (error) {
+      if (error?.status === 401) {
+        registerFailedAttempt(error.message)
+      } else if (error?.status === 404) {
+        setErrors({
+          ...EMPTY_ERRORS,
+          form: 'El servidor todavía no tiene habilitado el inicio de sesión.',
+        })
+      } else {
+        setErrors({
+          ...EMPTY_ERRORS,
+          form: error?.message || 'No pudimos iniciar sesión.',
+        })
+      }
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const handleGoogleSuccess = async (credentialResponse) => {
+    const credential = credentialResponse?.credential
+
+    if (!credential) {
+      setErrors({
+        ...EMPTY_ERRORS,
+        form: 'Google no devolvió una credencial válida.',
+      })
+      return
+    }
+
+    setGoogleLoading(true)
+
+    try {
+      const data = await loginWithGoogle(credential)
+      setErrors(EMPTY_ERRORS)
+      applySession(data)
+    } catch (error) {
+      setErrors({
+        ...EMPTY_ERRORS,
+        form: error?.message || 'No pudimos iniciar sesión con Google.',
+      })
+    } finally {
+      setGoogleLoading(false)
+    }
   }
 
   return (
@@ -177,18 +232,18 @@ function Login({ accounts = getAccounts(), onSuccess }) {
               htmlFor="identifier"
               className="mb-1.5 block text-sm text-slate-600"
             >
-              Correo electrónico o DNI
+              Correo electrónico
             </label>
             <input
               id="identifier"
               name="identifier"
-              type="text"
+              type="email"
               inputMode="email"
               autoComplete="username"
-              placeholder="correo@ejemplo.com / 8 digitos"
+              placeholder="correo@ejemplo.com"
               value={identifier}
               onChange={handleIdentifierChange}
-              disabled={isLocked}
+              disabled={isLocked || isBusy}
               aria-invalid={Boolean(errors.identifier)}
               aria-describedby={
                 errors.identifier ? 'identifier-error' : undefined
@@ -221,7 +276,7 @@ function Login({ accounts = getAccounts(), onSuccess }) {
                 placeholder="Mínimo 8 caracteres"
                 value={password}
                 onChange={handlePasswordChange}
-                disabled={isLocked}
+                disabled={isLocked || isBusy}
                 aria-invalid={Boolean(errors.password)}
                 aria-describedby={
                   errors.password ? 'password-error' : undefined
@@ -281,10 +336,14 @@ function Login({ accounts = getAccounts(), onSuccess }) {
 
           <button
             type="submit"
-            disabled={isLocked}
+            disabled={isLocked || isBusy}
             className="w-full rounded-full bg-gradient-to-r from-[#f2455c] to-[#f58a5f] px-4 py-3.5 text-sm font-semibold text-white shadow-lg shadow-rose-500/30 transition hover:brightness-105 focus:outline-none focus:ring-4 focus:ring-rose-200 disabled:cursor-not-allowed disabled:from-slate-300 disabled:to-slate-300 disabled:shadow-none"
           >
-            {isLocked ? 'Cuenta bloqueada temporalmente' : 'Ingresar'}
+            {isLocked
+              ? 'Cuenta bloqueada temporalmente'
+              : isSubmitting
+                ? 'Ingresando...'
+                : 'Ingresar'}
           </button>
 
           <p className="text-center text-xs leading-5 text-slate-400">
@@ -293,6 +352,33 @@ function Login({ accounts = getAccounts(), onSuccess }) {
               : 'Tras 5 intentos fallidos la cuenta se bloquea temporalmente.'}
           </p>
         </form>
+
+        {GOOGLE_CLIENT_ID && (
+          <div className="mt-6">
+            <div className="flex items-center gap-3">
+              <span className="h-px flex-1 bg-slate-200" />
+              <span className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                o
+              </span>
+              <span className="h-px flex-1 bg-slate-200" />
+            </div>
+
+            <div className="mt-4 flex justify-center">
+              <GoogleLogin
+                onSuccess={handleGoogleSuccess}
+                onError={() =>
+                  setErrors({
+                    ...EMPTY_ERRORS,
+                    form: 'No pudimos iniciar sesión con Google.',
+                  })
+                }
+                shape="pill"
+                text="continue_with"
+                width="320"
+              />
+            </div>
+          </div>
+        )}
 
         <div className="mt-10 text-center">
           <p className="text-sm text-slate-500">¿Aún no tienes cuenta?</p>

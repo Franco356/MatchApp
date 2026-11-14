@@ -1,4 +1,4 @@
-package model;
+package com.serviciocancha.macthappbackend.model;
 
 import jakarta.persistence.*;
 import lombok.Data;
@@ -7,7 +7,10 @@ import java.util.UUID;
 
 @Data
 @Entity
-@Table(name = "interactions")
+@Table(
+        name = "interactions",
+        uniqueConstraints = @UniqueConstraint(columnNames = {"user_id", "target_user_id"})
+)
 public class Interaction {
 
     @Id

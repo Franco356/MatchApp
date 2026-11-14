@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
-import { findAccount, updateAccountPassword } from '../services/accounts.js'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { forgotPassword, resetPassword } from '../services/auth.js'
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const DNI_REGEX = /^\d{8}$/
@@ -13,17 +13,38 @@ const FieldError = ({ message }) =>
     <p className="mt-1.5 text-xs font-medium text-rose-600">{message}</p>
   ) : null
 
+const titles = {
+  request: 'Recuperar contraseña',
+  sent: 'Revisa tu correo',
+  reset: 'Nueva contraseña',
+  done: 'Contraseña actualizada',
+}
+
+const subtitles = {
+  request:
+    'Ingresa tu correo o DNI registrado y te enviaremos un enlace para crear una nueva contraseña.',
+  sent: 'Si existe una cuenta con ese dato, enviamos un enlace de recuperación. Revisa también tu carpeta de spam. El enlace expira en 30 minutos.',
+  reset: 'Elige una contraseña nueva para tu cuenta.',
+  done: 'Ya puedes iniciar sesión con tu nueva contraseña.',
+}
+
 function RecuperarContrasena() {
-  const [step, setStep] = useState('request')
+  const [searchParams] = useSearchParams()
+  const navigate = useNavigate()
+  const token = searchParams.get('token')?.trim() ?? ''
+
+  const [step, setStep] = useState(token ? 'reset' : 'request')
   const [identifier, setIdentifier] = useState('')
-  const [account, setAccount] = useState(null)
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [errors, setErrors] = useState({})
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
-  const handleRequest = (event) => {
+  const handleRequest = async (event) => {
     event.preventDefault()
+
+    if (isSubmitting) return
 
     const value = identifier.trim()
     const nextErrors = {}
@@ -32,25 +53,30 @@ function RecuperarContrasena() {
       nextErrors.identifier = 'Ingresa tu correo o DNI.'
     } else if (!EMAIL_REGEX.test(value) && !DNI_REGEX.test(value)) {
       nextErrors.identifier = 'Ingresa un correo válido o un DNI de 8 dígitos.'
-    } else {
-      const found = findAccount(value)
-
-      if (!found) {
-        nextErrors.identifier = 'No encontramos una cuenta con ese dato.'
-      } else {
-        setAccount(found)
-      }
     }
 
     setErrors(nextErrors)
 
     if (Object.keys(nextErrors).length > 0) return
 
-    setStep('reset')
+    setIsSubmitting(true)
+
+    try {
+      await forgotPassword(value)
+      setStep('sent')
+    } catch (error) {
+      setErrors({
+        general: error?.message || 'No pudimos procesar la solicitud.',
+      })
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
-  const handleReset = (event) => {
+  const handleReset = async (event) => {
     event.preventDefault()
+
+    if (isSubmitting) return
 
     const nextErrors = {}
 
@@ -70,32 +96,66 @@ function RecuperarContrasena() {
 
     if (Object.keys(nextErrors).length > 0) return
 
-    updateAccountPassword(account.email, password)
-    setPassword('')
-    setConfirmPassword('')
-    setStep('done')
+    if (!token) {
+      setErrors({ general: 'El enlace no es válido. Solicita uno nuevo.' })
+      return
+    }
+
+    setIsSubmitting(true)
+
+    try {
+      await resetPassword({ token, newPassword: password })
+      setStep('done')
+    } catch (error) {
+      setErrors({
+        general: error?.message || 'No pudimos actualizar la contraseña.',
+      })
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   const handleRestart = () => {
     setIdentifier('')
-    setAccount(null)
     setPassword('')
     setConfirmPassword('')
     setErrors({})
+    setShowPassword(false)
     setStep('request')
+    navigate('/recuperar-contrasena', { replace: true })
   }
 
-  const titles = {
-    request: 'Recuperar contraseña',
-    reset: 'Nueva contraseña',
-    done: 'Contraseña actualizada',
+  const updateIdentifier = (event) => {
+    setIdentifier(event.target.value)
+    if (errors.identifier || errors.general) {
+      setErrors((current) => ({
+        ...current,
+        identifier: '',
+        general: '',
+      }))
+    }
   }
 
-  const subtitles = {
-    request:
-      'Ingresa tu correo o DNI registrado para restablecer tu contraseña.',
-    reset: `Cuenta: ${account?.email ?? ''}`,
-    done: 'Ya puedes iniciar sesión con tu nueva contraseña.',
+  const updatePassword = (event) => {
+    setPassword(event.target.value)
+    if (errors.password || errors.general) {
+      setErrors((current) => ({
+        ...current,
+        password: '',
+        general: '',
+      }))
+    }
+  }
+
+  const updateConfirmPassword = (event) => {
+    setConfirmPassword(event.target.value)
+    if (errors.confirmPassword || errors.general) {
+      setErrors((current) => ({
+        ...current,
+        confirmPassword: '',
+        general: '',
+      }))
+    }
   }
 
   return (
@@ -138,35 +198,67 @@ function RecuperarContrasena() {
                 autoComplete="username"
                 placeholder="correo@ejemplo.com / 8 dígitos"
                 value={identifier}
-                onChange={(event) => {
-                  setIdentifier(event.target.value)
-                  if (errors.identifier) {
-                    setErrors((current) => ({ ...current, identifier: '' }))
-                  }
-                }}
+                onChange={updateIdentifier}
                 aria-invalid={Boolean(errors.identifier)}
                 className={INPUT_CLASS}
               />
               <FieldError message={errors.identifier} />
             </div>
 
+            {errors.general && (
+              <p
+                role="alert"
+                className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs font-medium text-rose-700"
+              >
+                {errors.general}
+              </p>
+            )}
+
             <button
               type="submit"
-              className="w-full rounded-full bg-gradient-to-r from-[#f2455c] to-[#f58a5f] px-4 py-3.5 text-sm font-semibold text-white shadow-lg shadow-rose-500/30 transition hover:brightness-105 focus:outline-none focus:ring-4 focus:ring-rose-200"
+              disabled={isSubmitting}
+              className="w-full rounded-full bg-gradient-to-r from-[#f2455c] to-[#f58a5f] px-4 py-3.5 text-sm font-semibold text-white shadow-lg shadow-rose-500/30 transition hover:brightness-105 focus:outline-none focus:ring-4 focus:ring-rose-200 disabled:cursor-not-allowed disabled:from-slate-300 disabled:to-slate-300 disabled:shadow-none"
             >
-              Continuar
+              {isSubmitting ? 'Enviando...' : 'Enviar enlace'}
             </button>
           </form>
+        )}
+
+        {step === 'sent' && (
+          <div className="mt-6">
+            <div className="flex justify-center">
+              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-rose-100 text-rose-500">
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                  className="h-8 w-8"
+                >
+                  <rect x="3" y="5" width="18" height="14" rx="2" />
+                  <path d="m3 7 9 6 9-6" />
+                </svg>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleRestart}
+              className="mt-5 flex w-full items-center justify-center rounded-full border border-slate-300 px-4 py-3.5 text-sm font-semibold text-slate-600 transition hover:border-rose-400 hover:text-rose-500"
+            >
+              Usar otro correo o DNI
+            </button>
+          </div>
         )}
 
         {step === 'reset' && (
           <form noValidate onSubmit={handleReset} className="mt-6 space-y-5">
             <div>
               <div className="mb-1.5 flex items-center justify-between">
-                <label
-                  htmlFor="password"
-                  className="text-sm text-slate-600"
-                >
+                <label htmlFor="password" className="text-sm text-slate-600">
                   Nueva contraseña
                 </label>
                 <button
@@ -184,12 +276,7 @@ function RecuperarContrasena() {
                 autoComplete="new-password"
                 placeholder="Mínimo 8 caracteres"
                 value={password}
-                onChange={(event) => {
-                  setPassword(event.target.value)
-                  if (errors.password) {
-                    setErrors((current) => ({ ...current, password: '' }))
-                  }
-                }}
+                onChange={updatePassword}
                 aria-invalid={Boolean(errors.password)}
                 className={INPUT_CLASS}
               />
@@ -210,26 +297,28 @@ function RecuperarContrasena() {
                 autoComplete="new-password"
                 placeholder="Repite tu contraseña"
                 value={confirmPassword}
-                onChange={(event) => {
-                  setConfirmPassword(event.target.value)
-                  if (errors.confirmPassword) {
-                    setErrors((current) => ({
-                      ...current,
-                      confirmPassword: '',
-                    }))
-                  }
-                }}
+                onChange={updateConfirmPassword}
                 aria-invalid={Boolean(errors.confirmPassword)}
                 className={INPUT_CLASS}
               />
               <FieldError message={errors.confirmPassword} />
             </div>
 
+            {errors.general && (
+              <p
+                role="alert"
+                className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs font-medium text-rose-700"
+              >
+                {errors.general}
+              </p>
+            )}
+
             <button
               type="submit"
-              className="w-full rounded-full bg-gradient-to-r from-[#f2455c] to-[#f58a5f] px-4 py-3.5 text-sm font-semibold text-white shadow-lg shadow-rose-500/30 transition hover:brightness-105 focus:outline-none focus:ring-4 focus:ring-rose-200"
+              disabled={isSubmitting}
+              className="w-full rounded-full bg-gradient-to-r from-[#f2455c] to-[#f58a5f] px-4 py-3.5 text-sm font-semibold text-white shadow-lg shadow-rose-500/30 transition hover:brightness-105 focus:outline-none focus:ring-4 focus:ring-rose-200 disabled:cursor-not-allowed disabled:from-slate-300 disabled:to-slate-300 disabled:shadow-none"
             >
-              Guardar contraseña
+              {isSubmitting ? 'Guardando...' : 'Guardar contraseña'}
             </button>
 
             <button
@@ -237,7 +326,7 @@ function RecuperarContrasena() {
               onClick={handleRestart}
               className="w-full text-center text-xs font-semibold text-slate-500 transition hover:text-rose-500"
             >
-              Usar otra cuenta
+              Solicitar un enlace nuevo
             </button>
           </form>
         )}

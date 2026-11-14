@@ -1,24 +1,28 @@
 const ACCOUNTS_KEY = 'matchapp.accounts'
 const PROFILES_KEY = 'matchapp.profiles'
 
-export const DEMO_ACCOUNTS = [
-  {
-    email: 'demo@matchapp.pe',
-    dni: '12345678',
-    password: 'matchapp123',
-    nombres: 'Cuenta',
-    apellidos: 'Demo',
-    role: 'user',
-  },
-  {
-    email: 'admin@matchapp.pe',
-    dni: '87654321',
-    password: 'admin123',
-    nombres: 'Administrador',
-    apellidos: 'MatchApp',
-    role: 'admin',
-  },
-]
+const isDemoMode = import.meta.env.VITE_DEMO_MODE !== 'false'
+
+export const DEMO_ACCOUNTS = isDemoMode
+  ? [
+      {
+        email: 'demo@matchapp.pe',
+        dni: '12345678',
+        password: 'matchapp123',
+        nombres: 'Cuenta',
+        apellidos: 'Demo',
+        role: 'user',
+      },
+      {
+        email: 'admin@matchapp.pe',
+        dni: '87654321',
+        password: 'admin123',
+        nombres: 'Administrador',
+        apellidos: 'MatchApp',
+        role: 'admin',
+      },
+    ]
+  : []
 
 const readStoredAccounts = () => {
   try {
@@ -48,6 +52,8 @@ const matchesIdentifier = (account, identifier) => {
 }
 
 export const getAccounts = () => {
+  if (!isDemoMode) return []
+
   const stored = readStoredAccounts()
   const storedEmails = new Set(stored.map((account) => normalizeEmail(account.email)))
   const storedDnis = new Set(stored.map((account) => String(account.dni)))

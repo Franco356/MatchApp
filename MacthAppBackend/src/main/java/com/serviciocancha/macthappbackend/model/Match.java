@@ -1,4 +1,4 @@
-package model;
+package com.serviciocancha.macthappbackend.model;
 
 import jakarta.persistence.*;
 import lombok.Data;
@@ -7,7 +7,10 @@ import java.util.UUID;
 
 @Data
 @Entity
-@Table(name = "matches")
+@Table(
+        name = "matches",
+        uniqueConstraints = @UniqueConstraint(columnNames = {"user1_id", "user2_id"})
+)
 public class Match {
 
     @Id

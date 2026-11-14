@@ -17,4 +17,17 @@ export const clearSession = () => {
   window.localStorage.removeItem(SESSION_KEY)
 }
 
-export const isAuthenticated = () => Boolean(getSession())
+export const isAuthenticated = () => {
+  const session = getSession()
+  return Boolean(session?.token || session?.identifier)
+}
+
+export const getToken = () => getSession()?.token ?? null
+
+export const buildSession = ({ user, token }) => ({
+  identifier: user?.email ?? '',
+  role: user?.role ?? 'user',
+  user,
+  token,
+  loggedAt: new Date().toISOString(),
+})

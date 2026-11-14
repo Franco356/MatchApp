@@ -1,7 +1,8 @@
-package model;
+package com.serviciocancha.macthappbackend.model;
 
 import jakarta.persistence.*;
 import lombok.Data;
+import lombok.ToString;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.UUID;
@@ -30,6 +31,7 @@ public class User {
     @Column(nullable = false, unique = true, length = 150)
     private String email;
 
+    @ToString.Exclude
     @Column(name = "password_hash", nullable = false)
     private String passwordHash;
 

@@ -1,11 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import {
-  isDniRegistered,
-  isEmailRegistered,
-  saveAccount,
-} from '../services/accounts.js'
-import { saveSession } from '../auth.js'
+import { buildSession, saveSession } from '../auth.js'
+import { register as registerAccount, verifyDni } from '../services/auth.js'
 
 const MAX_BIRTH_DATE = new Date().toISOString().slice(0, 10)
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -52,6 +48,9 @@ function Registro() {
   const [form, setForm] = useState(INITIAL_FORM)
   const [errors, setErrors] = useState({})
   const [showPassword, setShowPassword] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [dniStatus, setDniStatus] = useState('idle')
+  const [dniMessage, setDniMessage] = useState('')
 
   const updateField = (field) => (event) => {
     const { type, checked, value } = event.target
@@ -60,8 +59,43 @@ function Registro() {
       [field]: type === 'checkbox' ? checked : value,
     }))
 
-    if (errors[field]) {
-      setErrors((current) => ({ ...current, [field]: '' }))
+    if (field === 'dni') {
+      setDniStatus('idle')
+      setDniMessage('')
+    }
+
+    if (errors[field] || errors.form) {
+      setErrors((current) => ({ ...current, [field]: '', form: '' }))
+    }
+  }
+
+  const handleDniBlur = async () => {
+    const dni = form.dni.trim()
+
+    if (!DNI_REGEX.test(dni) || dniStatus === 'checking') return
+
+    setDniStatus('checking')
+    setDniMessage('')
+
+    try {
+      const data = await verifyDni(dni)
+      setForm((current) => ({
+        ...current,
+        nombres: current.nombres || data?.nombres || '',
+        apellidos: current.apellidos || data?.apellidos || '',
+      }))
+      setDniStatus('verified')
+      setDniMessage('DNI verificado con RENIEC.')
+    } catch (error) {
+      setDniStatus('error')
+
+      if (error?.status === 503) {
+        setDniMessage('Verificación RENIEC no disponible. Completa tus datos manualmente.')
+      } else if (error?.status === 404 && /encontramos/i.test(error?.message ?? '')) {
+        setDniMessage(error.message)
+      } else {
+        setDniMessage('No pudimos verificar el DNI. Completa tus datos manualmente.')
+      }
     }
   }
 
@@ -88,8 +122,6 @@ function Registro() {
       nextErrors.dni = 'Ingresa tu DNI.'
     } else if (!DNI_REGEX.test(dni)) {
       nextErrors.dni = 'El DNI debe tener exactamente 8 dígitos.'
-    } else if (isDniRegistered(dni)) {
-      nextErrors.dni = 'Este DNI ya está registrado.'
     }
 
     if (!form.fechaNacimiento) {
@@ -111,8 +143,6 @@ function Registro() {
       nextErrors.email = 'Ingresa tu correo electrónico.'
     } else if (!EMAIL_REGEX.test(email)) {
       nextErrors.email = 'Ingresa un correo electrónico válido.'
-    } else if (isEmailRegistered(email)) {
-      nextErrors.email = 'Este correo ya está registrado.'
     }
 
     if (!form.password) {
@@ -135,32 +165,52 @@ function Registro() {
     return nextErrors
   }
 
-  const handleSubmit = (event) => {
+  const handleSubmit = async (event) => {
     event.preventDefault()
+
+    if (isSubmitting) return
 
     const nextErrors = validate()
     setErrors(nextErrors)
 
     if (Object.keys(nextErrors).length > 0) return
 
-    const email = form.email.trim().toLowerCase()
+    setIsSubmitting(true)
 
-    saveAccount({
-      nombres: form.nombres.trim(),
-      apellidos: form.apellidos.trim(),
-      dni: form.dni.trim(),
-      fechaNacimiento: form.fechaNacimiento,
-      email,
-      password: form.password,
-      termsAcceptedAt: new Date().toISOString(),
-    })
+    try {
+      const data = await registerAccount({
+        nombres: form.nombres.trim(),
+        apellidos: form.apellidos.trim(),
+        dni: form.dni.trim(),
+        fechaNacimiento: form.fechaNacimiento,
+        email: form.email.trim().toLowerCase(),
+        password: form.password,
+      })
 
-    saveSession({
-      identifier: email,
-      role: 'user',
-      loggedAt: new Date().toISOString(),
-    })
-    navigate('/completar-perfil', { replace: true })
+      if (!data?.token) {
+        setErrors({ form: 'El servidor no devolvió una sesión válida.' })
+        return
+      }
+
+      saveSession(buildSession(data))
+      navigate('/completar-perfil', { replace: true })
+    } catch (error) {
+      const message = error?.message || 'No pudimos crear tu cuenta.'
+
+      if (error?.status === 400 && /correo|email/i.test(message)) {
+        setErrors({ email: message })
+      } else if (error?.status === 400 && /dni/i.test(message)) {
+        setErrors({ dni: message })
+      } else if (error?.status === 404) {
+        setErrors({
+          form: 'El servidor todavía no tiene habilitado el registro.',
+        })
+      } else {
+        setErrors({ form: message })
+      }
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   return (
@@ -253,6 +303,8 @@ function Registro() {
               placeholder="8 dígitos"
               value={form.dni}
               onChange={updateField('dni')}
+              onBlur={handleDniBlur}
+              disabled={isSubmitting}
               aria-invalid={Boolean(errors.dni)}
               aria-describedby="dni-help"
               className={INPUT_CLASS}
@@ -260,6 +312,19 @@ function Registro() {
             <p id="dni-help" className="mt-1.5 text-xs text-slate-400">
               Se usa solo para verificar identidad y edad
             </p>
+            {dniStatus === 'checking' && (
+              <p className="mt-1.5 text-xs text-slate-500">
+                Verificando DNI...
+              </p>
+            )}
+            {dniStatus === 'verified' && (
+              <p className="mt-1.5 text-xs font-medium text-emerald-600">
+                {dniMessage}
+              </p>
+            )}
+            {dniStatus === 'error' && (
+              <p className="mt-1.5 text-xs text-amber-600">{dniMessage}</p>
+            )}
             <FieldError message={errors.dni} />
           </div>
 
@@ -380,11 +445,22 @@ function Registro() {
             <FieldError message={errors.terms} />
           </div>
 
+          {errors.form && (
+            <div
+              role="alert"
+              aria-live="polite"
+              className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700"
+            >
+              {errors.form}
+            </div>
+          )}
+
           <button
             type="submit"
-            className="w-full rounded-full bg-gradient-to-r from-[#f2455c] to-[#f58a5f] px-4 py-3.5 text-sm font-semibold text-white shadow-lg shadow-rose-500/30 transition hover:brightness-105 focus:outline-none focus:ring-4 focus:ring-rose-200"
+            disabled={isSubmitting}
+            className="w-full rounded-full bg-gradient-to-r from-[#f2455c] to-[#f58a5f] px-4 py-3.5 text-sm font-semibold text-white shadow-lg shadow-rose-500/30 transition hover:brightness-105 focus:outline-none focus:ring-4 focus:ring-rose-200 disabled:cursor-not-allowed disabled:from-slate-300 disabled:to-slate-300 disabled:shadow-none"
           >
-            Continuar
+            {isSubmitting ? 'Creando cuenta...' : 'Continuar'}
           </button>
         </form>
 
