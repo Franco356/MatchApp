@@ -1,7 +1,10 @@
 import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
-import { buildSession, saveSession } from '../auth.js'
-import { register as registerAccount, verifyDni } from '../services/auth.js'
+import { Link } from 'react-router-dom'
+import {
+  register as registerAccount,
+  resendVerification,
+  verifyDni,
+} from '../services/auth.js'
 
 const MAX_BIRTH_DATE = new Date().toISOString().slice(0, 10)
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -44,13 +47,15 @@ const FieldError = ({ message }) =>
   ) : null
 
 function Registro() {
-  const navigate = useNavigate()
   const [form, setForm] = useState(INITIAL_FORM)
   const [errors, setErrors] = useState({})
   const [showPassword, setShowPassword] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [dniStatus, setDniStatus] = useState('idle')
   const [dniMessage, setDniMessage] = useState('')
+  const [sentTo, setSentTo] = useState('')
+  const [resendStatus, setResendStatus] = useState('idle')
+  const [resendMessage, setResendMessage] = useState('')
 
   const updateField = (field) => (event) => {
     const { type, checked, value } = event.target
@@ -187,13 +192,10 @@ function Registro() {
         password: form.password,
       })
 
-      if (!data?.token) {
-        setErrors({ form: 'El servidor no devolvió una sesión válida.' })
-        return
-      }
-
-      saveSession(buildSession(data))
-      navigate('/completar-perfil', { replace: true })
+      setSentTo(data?.user?.email || form.email.trim().toLowerCase())
+      setResendStatus('idle')
+      setResendMessage('')
+      setErrors({})
     } catch (error) {
       const message = error?.message || 'No pudimos crear tu cuenta.'
 
@@ -211,6 +213,118 @@ function Registro() {
     } finally {
       setIsSubmitting(false)
     }
+  }
+
+  const handleResend = async () => {
+    if (!sentTo || resendStatus === 'sending') return
+
+    setResendStatus('sending')
+    setResendMessage('')
+
+    try {
+      await resendVerification(sentTo)
+      setResendStatus('sent')
+      setResendMessage(
+        'Te enviamos un nuevo enlace. Revisa también tu carpeta de spam.'
+      )
+    } catch (error) {
+      setResendStatus('error')
+      setResendMessage(error?.message || 'No pudimos reenviar el correo.')
+    }
+  }
+
+  const handleUseAnotherEmail = () => {
+    setSentTo('')
+    setResendStatus('idle')
+    setResendMessage('')
+  }
+
+  if (sentTo) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-[#d9d9d9] px-4 py-10">
+        <div className="w-full max-w-sm rounded-2xl bg-white px-6 py-8 text-center shadow-2xl shadow-black/40">
+          <div className="flex items-center justify-center gap-2 text-rose-500">
+            <svg
+              viewBox="0 0 24 24"
+              fill="currentColor"
+              aria-hidden="true"
+              className="h-5 w-5"
+            >
+              <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
+            </svg>
+            <span className="text-lg font-extrabold italic tracking-tight">
+              MatchApp
+            </span>
+          </div>
+
+          <div className="mx-auto mt-6 flex h-14 w-14 items-center justify-center rounded-full bg-emerald-50 text-emerald-500">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              aria-hidden="true"
+              className="h-7 w-7"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+              />
+            </svg>
+          </div>
+
+          <h1 className="mt-5 text-2xl font-extrabold text-slate-900">
+            Revisa tu correo
+          </h1>
+          <p className="mt-3 text-sm leading-6 text-slate-500">
+            Te enviamos un enlace de verificación a{' '}
+            <span className="font-semibold text-slate-700">{sentTo}</span>.
+            Ábrelo para activar tu cuenta. El enlace vence en 24 horas.
+          </p>
+
+          {resendMessage && (
+            <div
+              role="status"
+              aria-live="polite"
+              className={`mt-5 rounded-xl border px-4 py-3 text-xs ${
+                resendStatus === 'error'
+                  ? 'border-rose-200 bg-rose-50 text-rose-700'
+                  : 'border-emerald-200 bg-emerald-50 text-emerald-700'
+              }`}
+            >
+              {resendMessage}
+            </div>
+          )}
+
+          <button
+            type="button"
+            onClick={handleResend}
+            disabled={resendStatus === 'sending'}
+            className="mt-5 w-full rounded-full bg-gradient-to-r from-[#f2455c] to-[#f58a5f] px-4 py-3.5 text-sm font-semibold text-white shadow-lg shadow-rose-500/30 transition hover:brightness-105 focus:outline-none focus:ring-4 focus:ring-rose-200 disabled:cursor-not-allowed disabled:from-slate-300 disabled:to-slate-300 disabled:shadow-none"
+          >
+            {resendStatus === 'sending'
+              ? 'Reenviando...'
+              : 'Reenviar correo de verificación'}
+          </button>
+
+          <Link
+            to="/login"
+            className="mt-4 block text-sm font-semibold text-rose-500 hover:text-rose-600"
+          >
+            Ya verifiqué, iniciar sesión
+          </Link>
+
+          <button
+            type="button"
+            onClick={handleUseAnotherEmail}
+            className="mt-3 text-xs font-semibold text-slate-400 transition hover:text-slate-600"
+          >
+            Usar otro correo
+          </button>
+        </div>
+      </main>
+    )
   }
 
   return (

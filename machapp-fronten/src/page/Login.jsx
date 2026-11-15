@@ -2,7 +2,11 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { GoogleLogin } from '@react-oauth/google'
 import { buildSession, saveSession } from '../auth.js'
-import { login as loginRequest, loginWithGoogle } from '../services/auth.js'
+import {
+  login as loginRequest,
+  loginWithGoogle,
+  resendVerification,
+} from '../services/auth.js'
 
 const MAX_ATTEMPTS = 5
 const LOCK_DURATION_MS = 5 * 60 * 1000
@@ -33,6 +37,8 @@ function Login({ onSuccess }) {
   const [failedAttempts, setFailedAttempts] = useState(0)
   const [lockedUntil, setLockedUntil] = useState(0)
   const [now, setNow] = useState(() => Date.now())
+  const [needsVerification, setNeedsVerification] = useState(false)
+  const [resendStatus, setResendStatus] = useState('idle')
 
   const isLocked = lockedUntil > now
   const secondsLeft = isLocked ? Math.ceil((lockedUntil - now) / 1000) : 0
@@ -74,6 +80,10 @@ function Login({ onSuccess }) {
 
   const handleIdentifierChange = (event) => {
     setIdentifier(event.target.value)
+    if (needsVerification) {
+      setNeedsVerification(false)
+      setResendStatus('idle')
+    }
     if (errors.identifier || errors.form) {
       setErrors((current) => ({ ...current, identifier: '', form: '' }))
     }
@@ -141,6 +151,8 @@ function Login({ onSuccess }) {
     if (nextErrors.identifier || nextErrors.password) return
 
     setIsSubmitting(true)
+    setNeedsVerification(false)
+    setResendStatus('idle')
 
     try {
       const data = await loginRequest({
@@ -155,6 +167,12 @@ function Login({ onSuccess }) {
     } catch (error) {
       if (error?.status === 401) {
         registerFailedAttempt(error.message)
+      } else if (error?.status === 403) {
+        setNeedsVerification(true)
+        setErrors({
+          ...EMPTY_ERRORS,
+          form: error?.message || 'Debes verificar tu correo antes de iniciar sesión.',
+        })
       } else if (error?.status === 404) {
         setErrors({
           ...EMPTY_ERRORS,
@@ -168,6 +186,25 @@ function Login({ onSuccess }) {
       }
     } finally {
       setIsSubmitting(false)
+    }
+  }
+
+  const handleResendVerification = async () => {
+    const email = identifier.trim().toLowerCase()
+
+    if (!isEmail(email) || resendStatus === 'sending') return
+
+    setResendStatus('sending')
+
+    try {
+      await resendVerification(email)
+      setResendStatus('sent')
+    } catch (error) {
+      setResendStatus('idle')
+      setErrors({
+        ...EMPTY_ERRORS,
+        form: error?.message || 'No pudimos reenviar el correo de verificación.',
+      })
     }
   }
 
@@ -330,6 +367,27 @@ function Login({ onSuccess }) {
                 </>
               ) : (
                 <p className="mt-1">{errors.form}</p>
+              )}
+
+              {!isLocked && needsVerification && (
+                <div className="mt-3">
+                  {resendStatus === 'sent' ? (
+                    <p className="text-xs font-semibold text-emerald-700">
+                      Correo reenviado. Revisa tu bandeja de entrada y spam.
+                    </p>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={handleResendVerification}
+                      disabled={resendStatus === 'sending'}
+                      className="text-xs font-semibold text-rose-600 underline-offset-2 transition hover:underline disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {resendStatus === 'sending'
+                        ? 'Reenviando...'
+                        : 'Reenviar correo de verificación'}
+                    </button>
+                  )}
+                </div>
               )}
             </div>
           )}

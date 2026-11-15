@@ -8,6 +8,7 @@ import Chats from './page/Chats.jsx'
 import Registro from './page/Registro.jsx'
 import CompletarPerfil from './page/CompletarPerfil.jsx'
 import RecuperarContrasena from './page/RecuperarContrasena.jsx'
+import VerificarCorreo from './page/VerificarCorreo.jsx'
 import Gestionar from './page/Gestionar.jsx'
 import PreferenciasBusqueda from './page/PreferenciasBusqueda.jsx'
 import Ajustes from './page/Ajustes.jsx'
@@ -32,6 +33,7 @@ function App() {
           }
         />
         <Route path="/recuperar-contrasena" element={<RecuperarContrasena />} />
+        <Route path="/verificar-correo" element={<VerificarCorreo />} />
         <Route
           path="/gestionar"
           element={

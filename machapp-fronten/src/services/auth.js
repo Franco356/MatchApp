@@ -33,6 +33,18 @@ export const resetPassword = ({ token, newPassword }) =>
     body: { token, newPassword },
   })
 
+export const verifyEmail = (token) =>
+  apiRequest('/api/auth/verify-email', {
+    method: 'POST',
+    body: { token },
+  })
+
+export const resendVerification = (email) =>
+  apiRequest('/api/auth/resend-verification', {
+    method: 'POST',
+    body: { email: email.trim().toLowerCase() },
+  })
+
 export const getMe = (token) =>
   apiRequest('/api/users/me', { token })
 
