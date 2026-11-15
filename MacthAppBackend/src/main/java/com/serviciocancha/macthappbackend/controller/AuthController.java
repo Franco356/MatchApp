@@ -6,7 +6,10 @@ import com.serviciocancha.macthappbackend.dto.ForgotPasswordRequest;
 import com.serviciocancha.macthappbackend.dto.GoogleLoginRequest;
 import com.serviciocancha.macthappbackend.dto.LoginRequest;
 import com.serviciocancha.macthappbackend.dto.RegisterRequest;
+import com.serviciocancha.macthappbackend.dto.RegisterResponse;
+import com.serviciocancha.macthappbackend.dto.ResendVerificationRequest;
 import com.serviciocancha.macthappbackend.dto.ResetPasswordRequest;
+import com.serviciocancha.macthappbackend.dto.VerifyEmailRequest;
 import com.serviciocancha.macthappbackend.exception.ApiException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -34,8 +37,32 @@ public class AuthController {
     }
 
     @PostMapping("/register")
-    public ResponseEntity<AuthResponse> register(@RequestBody RegisterRequest request) {
+    public ResponseEntity<RegisterResponse> register(@RequestBody RegisterRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED).body(authService.register(request));
+    }
+
+    @PostMapping("/verify-email")
+    public ResponseEntity<AuthResponse> verifyEmail(@RequestBody VerifyEmailRequest request) {
+        if (request == null) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Datos inválidos.");
+        }
+
+        return ResponseEntity.ok(authService.verifyEmail(request.token()));
+    }
+
+    @PostMapping("/resend-verification")
+    public ResponseEntity<Map<String, String>> resendVerification(
+            @RequestBody ResendVerificationRequest request
+    ) {
+        if (request == null) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Datos inválidos.");
+        }
+
+        authService.resendVerification(request.email());
+        return ResponseEntity.ok(Map.of(
+                "message",
+                "Si la cuenta existe y no está verificada, enviamos un nuevo enlace."
+        ));
     }
 
     @PostMapping("/login")

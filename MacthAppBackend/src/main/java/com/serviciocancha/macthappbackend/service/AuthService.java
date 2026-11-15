@@ -6,6 +6,7 @@ import com.serviciocancha.macthappbackend.dto.AuthResponse;
 import com.serviciocancha.macthappbackend.dto.DniResponse;
 import com.serviciocancha.macthappbackend.dto.LoginRequest;
 import com.serviciocancha.macthappbackend.dto.RegisterRequest;
+import com.serviciocancha.macthappbackend.dto.RegisterResponse;
 import com.serviciocancha.macthappbackend.dto.UserResponse;
 import com.serviciocancha.macthappbackend.exception.ApiException;
 import com.serviciocancha.macthappbackend.model.User;
@@ -39,6 +40,7 @@ public class AuthService {
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
     private final PasswordEncoder passwordEncoder;
+    private final EmailVerificationService emailVerificationService;
     private final String googleClientId;
     private final String apiperuToken;
 
@@ -47,6 +49,7 @@ public class AuthService {
             JwtService jwtService,
             ObjectMapper objectMapper,
             PasswordEncoder passwordEncoder,
+            EmailVerificationService emailVerificationService,
             @Value("${app.google.client-id:}") String googleClientId,
             @Value("${app.apiperu.token:}") String apiperuToken
     ) {
@@ -55,11 +58,12 @@ public class AuthService {
         this.objectMapper = objectMapper;
         this.httpClient = HttpClient.newHttpClient();
         this.passwordEncoder = passwordEncoder;
+        this.emailVerificationService = emailVerificationService;
         this.googleClientId = googleClientId;
         this.apiperuToken = apiperuToken;
     }
 
-    public AuthResponse register(RegisterRequest request) {
+    public RegisterResponse register(RegisterRequest request) {
         String nombres = trim(request.nombres());
         String apellidos = trim(request.apellidos());
         String dni = trim(request.dni());
@@ -102,10 +106,16 @@ public class AuthService {
         user.setEmail(email);
         user.setPasswordHash(passwordEncoder.encode(password));
         user.setRole("user");
+        user.setEmailVerified(false);
         user.setTermsAcceptedAt(OffsetDateTime.now());
 
         User saved = userRepository.save(user);
-        return buildResponse(saved);
+        emailVerificationService.requestVerification(saved);
+
+        return new RegisterResponse(
+                "Te enviamos un correo para verificar tu cuenta.",
+                UserResponse.from(saved)
+        );
     }
 
     public AuthResponse login(LoginRequest request) {
@@ -127,6 +137,12 @@ public class AuthService {
 
         if (!matches) {
             throw new ApiException(HttpStatus.UNAUTHORIZED, "Credenciales incorrectas.");
+        }
+        if (Boolean.FALSE.equals(user.getEmailVerified())) {
+            throw new ApiException(
+                    HttpStatus.FORBIDDEN,
+                    "Debes verificar tu correo antes de iniciar sesión."
+            );
         }
 
         return buildResponse(user);
@@ -164,7 +180,20 @@ public class AuthService {
                         "No existe una cuenta con ese correo. Regístrate primero."
                 ));
 
+        if (Boolean.FALSE.equals(user.getEmailVerified())) {
+            user.setEmailVerified(true);
+            userRepository.save(user);
+        }
+
         return buildResponse(user);
+    }
+
+    public AuthResponse verifyEmail(String token) {
+        return buildResponse(emailVerificationService.verify(token));
+    }
+
+    public void resendVerification(String email) {
+        emailVerificationService.resend(email);
     }
 
     public DniResponse verifyDni(String dni) {

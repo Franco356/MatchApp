@@ -1,5 +1,8 @@
 package com.serviciocancha.macthappbackend;
 
+import com.serviciocancha.macthappbackend.model.User;
+import com.serviciocancha.macthappbackend.repository.UserRepository;
+import com.serviciocancha.macthappbackend.service.EmailVerificationService;
 import com.serviciocancha.macthappbackend.service.PasswordResetService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -32,8 +35,14 @@ class AuthFlowTests {
     @Autowired
     private PasswordResetService passwordResetService;
 
+    @Autowired
+    private EmailVerificationService emailVerificationService;
+
+    @Autowired
+    private UserRepository userRepository;
+
     @Test
-    void registerLoginAndManageAccount() throws Exception {
+    void registerVerifyEmailLoginAndManageAccount() throws Exception {
         String email = "user-" + UUID.randomUUID() + "@test.pe";
         String dni = String.format("%08d", Math.floorMod(UUID.randomUUID().hashCode(), 100_000_000));
         String password = "secreta123";
@@ -50,18 +59,58 @@ class AuthFlowTests {
                 }
                 """.formatted(dni, email, password);
 
-        MvcResult registerResult = mockMvc.perform(post("/api/auth/register")
+        mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(registerBody))
                 .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.message").isNotEmpty())
+                .andExpect(jsonPath("$.user.email").value(email))
+                .andExpect(jsonPath("$.token").doesNotExist());
+
+        mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"email":"%s","password":"%s"}
+                                """.formatted(email, password)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.message").value(
+                        "Debes verificar tu correo antes de iniciar sesión."
+                ));
+
+        mockMvc.perform(post("/api/auth/resend-verification")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"email":"%s"}
+                                """.formatted(email)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.message").isNotEmpty());
+
+        User registered = userRepository.findByEmail(email).orElseThrow();
+        String verificationToken = emailVerificationService.requestVerification(registered);
+        assertNotNull(verificationToken);
+
+        MvcResult verifyResult = mockMvc.perform(post("/api/auth/verify-email")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"token":"%s"}
+                                """.formatted(verificationToken)))
+                .andExpect(status().isOk())
                 .andExpect(jsonPath("$.token").isNotEmpty())
                 .andExpect(jsonPath("$.user.email").value(email))
                 .andReturn();
 
         String token = objectMapper
-                .readTree(registerResult.getResponse().getContentAsString())
+                .readTree(verifyResult.getResponse().getContentAsString())
                 .path("token")
                 .asText();
+
+        mockMvc.perform(post("/api/auth/verify-email")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"token":"%s"}
+                                """.formatted(verificationToken)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("El enlace no es válido o ya expiró."));
 
         mockMvc.perform(get("/api/users/me")
                         .header("Authorization", "Bearer " + token))
@@ -122,6 +171,10 @@ class AuthFlowTests {
                                 }
                                 """.formatted(dni, email, oldPassword)))
                 .andExpect(status().isCreated());
+
+        User user = userRepository.findByEmail(email).orElseThrow();
+        user.setEmailVerified(true);
+        userRepository.save(user);
 
         mockMvc.perform(post("/api/auth/forgot-password")
                         .contentType(MediaType.APPLICATION_JSON)

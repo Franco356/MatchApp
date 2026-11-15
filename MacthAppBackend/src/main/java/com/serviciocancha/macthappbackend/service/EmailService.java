@@ -29,36 +29,63 @@ public class EmailService {
     }
 
     public void sendPasswordReset(String to, String link) {
+        send(
+                to,
+                "Recupera tu contraseña de MatchApp",
+                """
+                Recibimos una solicitud para restablecer tu contraseña de MatchApp.
+                Abre este enlace para crear una nueva contraseña (expira en 30 minutos):
+                """,
+                link,
+                "Si no solicitaste este cambio, ignora este correo.",
+                "recuperación"
+        );
+    }
+
+    public void sendEmailVerification(String to, String link) {
+        send(
+                to,
+                "Verifica tu correo de MatchApp",
+                """
+                Gracias por registrarte en MatchApp.
+                Abre este enlace para verificar tu correo (expira en 24 horas):
+                """,
+                link,
+                "Si no creaste esta cuenta, ignora este correo.",
+                "verificación"
+        );
+    }
+
+    private void send(String to, String subject, String intro, String link, String footer, String kind) {
         if (mailHost == null || mailHost.isBlank()) {
-            log.warn("MAIL_HOST no configurado. Enlace de recuperación para {}: {}", to, link);
+            log.warn("MAIL_HOST no configurado. Enlace de {} para {}: {}", kind, to, link);
             return;
         }
 
         JavaMailSender mailSender = mailSenderProvider.getIfAvailable();
         if (mailSender == null) {
-            log.warn("No hay JavaMailSender configurado. Enlace de recuperación para {}: {}", to, link);
+            log.warn("No hay JavaMailSender configurado. Enlace de {} para {}: {}", kind, to, link);
             return;
         }
 
         SimpleMailMessage message = new SimpleMailMessage();
         message.setFrom(from);
         message.setTo(to);
-        message.setSubject("Recupera tu contraseña de MatchApp");
+        message.setSubject(subject);
         message.setText("""
                 Hola,
 
-                Recibimos una solicitud para restablecer tu contraseña de MatchApp.
-                Abre este enlace para crear una nueva contraseña (expira en 30 minutos):
+                %s
 
                 %s
 
-                Si no solicitaste este cambio, ignora este correo.
-                """.formatted(link));
+                %s
+                """.formatted(intro.strip(), link, footer));
 
         try {
             mailSender.send(message);
         } catch (MailException exception) {
-            log.error("No se pudo enviar el correo de recuperación a {}", to, exception);
+            log.error("No se pudo enviar el correo de {} a {}", kind, to, exception);
         }
     }
 }
