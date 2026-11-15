@@ -7,6 +7,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.mail.MailException;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -28,6 +29,7 @@ public class EmailService {
         this.from = from;
     }
 
+    @Async
     public void sendPasswordReset(String to, String link) {
         send(
                 to,
@@ -42,6 +44,7 @@ public class EmailService {
         );
     }
 
+    @Async
     public void sendEmailVerification(String to, String link) {
         send(
                 to,
@@ -85,7 +88,13 @@ public class EmailService {
         try {
             mailSender.send(message);
         } catch (MailException exception) {
-            log.error("No se pudo enviar el correo de {} a {}", kind, to, exception);
+            log.error(
+                    "No se pudo enviar el correo de {} a {}. Enlace: {}",
+                    kind,
+                    to,
+                    link,
+                    exception
+            );
         }
     }
 }

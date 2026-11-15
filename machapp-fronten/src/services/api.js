@@ -1,4 +1,15 @@
-const API_URL = (import.meta.env.VITE_API_URL ?? '').replace(/\/+$/, '')
+const normalizeApiUrl = (value) => {
+  const url = (value ?? '').trim().replace(/\/+$/, '')
+
+  if (!url || url.startsWith('/')) return url
+  if (/^https?:\/\//i.test(url)) return url
+  if (/^(localhost|127\.0\.0\.1)(:\d+)?$/i.test(url)) return `http://${url}`
+
+  return `https://${url}`
+}
+
+const API_URL = normalizeApiUrl(import.meta.env.VITE_API_URL)
+const REQUEST_TIMEOUT_MS = 30000
 
 export class ApiError extends Error {
   constructor(message, status, data) {
@@ -38,6 +49,12 @@ export const apiRequest = async (
     throw new ApiError('Falta configurar VITE_API_URL en .env.local.', 0)
   }
 
+  const controller = new AbortController()
+  const timeoutId = window.setTimeout(
+    () => controller.abort(),
+    REQUEST_TIMEOUT_MS,
+  )
+
   let response
   try {
     response = await fetch(`${API_URL}${path}`, {
@@ -48,12 +65,22 @@ export const apiRequest = async (
         ...headers,
       },
       body: body ? JSON.stringify(body) : undefined,
+      signal: controller.signal,
     })
-  } catch {
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      throw new ApiError(
+        'El servidor tardó demasiado en responder. Intenta de nuevo.',
+        0,
+      )
+    }
+
     throw new ApiError(
       'No pudimos conectar con el servidor. Revisa tu conexión e intenta de nuevo.',
       0,
     )
+  } finally {
+    window.clearTimeout(timeoutId)
   }
 
   const data = await readBody(response)
