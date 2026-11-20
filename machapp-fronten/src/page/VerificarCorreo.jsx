@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { buildSession, saveSession } from '../auth.js'
 import { verifyEmail } from '../services/auth.js'
@@ -11,30 +11,47 @@ function VerificarCorreo() {
   const [message, setMessage] = useState(
     token ? '' : 'El enlace no incluye un token de verificación.'
   )
+  const verificationRef = useRef(null)
 
   useEffect(() => {
     if (!token) return undefined
 
-    let active = true
-
-    const verify = async () => {
-      try {
-        const data = await verifyEmail(token)
-        if (!active) return
-
-        if (data?.token && data?.user) {
-          saveSession(buildSession(data))
-        }
-
-        setStatus('success')
-      } catch (error) {
-        if (!active) return
-        setStatus('error')
-        setMessage(error?.message || 'No pudimos verificar tu correo.')
+    if (verificationRef.current?.token !== token) {
+      verificationRef.current = {
+        token,
+        promise: verifyEmail(token)
+          .then((data) => {
+            try {
+              if (data?.token && data?.user) {
+                saveSession(buildSession(data))
+              }
+              return { ok: true }
+            } catch (error) {
+              return {
+                ok: false,
+                message: error?.message || 'No pudimos guardar la sesión.',
+              }
+            }
+          })
+          .catch((error) => ({
+            ok: false,
+            message: error?.message || 'No pudimos verificar tu correo.',
+          })),
       }
     }
 
-    verify()
+    let active = true
+
+    verificationRef.current.promise.then((result) => {
+      if (!active) return
+
+      if (result.ok) {
+        setStatus('success')
+      } else {
+        setStatus('error')
+        setMessage(result.message)
+      }
+    })
 
     return () => {
       active = false

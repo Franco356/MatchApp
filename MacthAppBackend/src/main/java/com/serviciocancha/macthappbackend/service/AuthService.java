@@ -22,6 +22,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.Period;
@@ -56,7 +57,9 @@ public class AuthService {
         this.userRepository = userRepository;
         this.jwtService = jwtService;
         this.objectMapper = objectMapper;
-        this.httpClient = HttpClient.newHttpClient();
+        this.httpClient = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(10))
+                .build();
         this.passwordEncoder = passwordEncoder;
         this.emailVerificationService = emailVerificationService;
         this.googleClientId = googleClientId;
@@ -234,6 +237,7 @@ public class AuthService {
     private JsonNode getJson(String url, String bearerToken) {
         HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(url))
                 .GET()
+                .timeout(Duration.ofSeconds(20))
                 .header("Accept", "application/json");
 
         if (bearerToken != null && !bearerToken.isBlank()) {

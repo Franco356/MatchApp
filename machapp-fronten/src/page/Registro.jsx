@@ -203,10 +203,6 @@ function Registro() {
         setErrors({ email: message })
       } else if (error?.status === 400 && /dni/i.test(message)) {
         setErrors({ dni: message })
-      } else if (error?.status === 404) {
-        setErrors({
-          form: 'El servidor todavía no tiene habilitado el registro.',
-        })
       } else {
         setErrors({ form: message })
       }
